@@ -64,6 +64,9 @@ public:
   /// Get a value as a day of week
   int getDay( const std::string& ) const
   throw( ConfigError, FieldConvertError );
+  /// Get a value as a Julian date parsed from a YYYY-MM-DD string
+  int getDate( const std::string& ) const
+  throw( ConfigError, FieldConvertError );
 
   /// Set a value from a string.
   void setString( const std::string&, const std::string& );
