@@ -100,18 +100,49 @@ Session* SessionFactory::create( const SessionID& sessionID,
   }
   catch ( FieldConvertError & e ) { throw ConfigError( e.what() ); }
 
-  TimeRange utcSessionTime
-    ( startTime, endTime, startDay, endDay );
-  TimeRange localSessionTime
-    ( LocalTimeOnly(startTime.getHour(), startTime.getMinute(), startTime.getSecond()),
-      LocalTimeOnly(endTime.getHour(), endTime.getMinute(), endTime.getSecond()),
-      startDay, endDay );
-  TimeRange sessionTimeRange = useLocalTime ? localSessionTime : utcSessionTime;
-
   if( startDay >= 0 && endDay < 0 )
     throw ConfigError( "StartDay used without EndDay" );
   if( endDay >= 0 && startDay < 0 )
     throw ConfigError( "EndDay used without StartDay" );
+
+  int periodDays = 7;
+  int anchorJulianDate = -1;
+  if( settings.has( SESSION_PERIOD_DAYS ) )
+  {
+    try { periodDays = settings.getInt( SESSION_PERIOD_DAYS ); }
+    catch( FieldConvertError & e ) { throw ConfigError( e.what() ); }
+    if( periodDays <= 0 || periodDays % 7 != 0 )
+      throw ConfigError( "SessionPeriodDays must be a positive multiple of 7" );
+  }
+  if( settings.has( SESSION_ANCHOR_DATE ) )
+  {
+    if( periodDays <= 7 )
+      throw ConfigError( "SessionAnchorDate requires SessionPeriodDays > 7" );
+    try { anchorJulianDate = settings.getDate( SESSION_ANCHOR_DATE ); }
+    catch( FieldConvertError & e ) { throw ConfigError( e.what() ); }
+  }
+  if( periodDays > 7 )
+  {
+    if( anchorJulianDate < 0 )
+      throw ConfigError( "SessionPeriodDays > 7 requires SessionAnchorDate" );
+    if( startDay < 0 || endDay < 0 )
+      throw ConfigError( "SessionPeriodDays > 7 requires StartDay and EndDay" );
+    if( startDay != endDay )
+      throw ConfigError( "SessionPeriodDays > 7 requires StartDay == EndDay" );
+    if( !( startTime > endTime ) )
+      throw ConfigError( "SessionPeriodDays > 7 requires StartTime > EndTime (wrap-around maintenance window)" );
+    DateTime anchorDateTime( anchorJulianDate, 0 );
+    if( anchorDateTime.getWeekDay() != startDay )
+      throw ConfigError( "SessionAnchorDate must fall on the same weekday as StartDay" );
+  }
+
+  TimeRange utcSessionTime
+    ( startTime, endTime, startDay, endDay, periodDays, anchorJulianDate );
+  TimeRange localSessionTime
+    ( LocalTimeOnly(startTime.getHour(), startTime.getMinute(), startTime.getSecond()),
+      LocalTimeOnly(endTime.getHour(), endTime.getMinute(), endTime.getSecond()),
+      startDay, endDay, periodDays, anchorJulianDate );
+  TimeRange sessionTimeRange = useLocalTime ? localSessionTime : utcSessionTime;
 
   HeartBtInt heartBtInt( 0 );
   if ( connectionType == "initiator" )
@@ -155,11 +186,11 @@ Session* SessionFactory::create( const SessionID& sessionID,
   catch( FieldConvertError & e ) { throw ConfigError( e.what() ); }
 
   TimeRange utcLogonTime
-    ( logonTime, logoutTime, logonDay, logoutDay );
+    ( logonTime, logoutTime, logonDay, logoutDay, periodDays, anchorJulianDate );
   TimeRange localLogonTime
     ( LocalTimeOnly(logonTime.getHour(), logonTime.getMinute(), logonTime.getSecond()),
       LocalTimeOnly(logoutTime.getHour(), logoutTime.getMinute(), logoutTime.getSecond()),
-      logonDay, logoutDay );
+      logonDay, logoutDay, periodDays, anchorJulianDate );
   TimeRange logonTimeRange = useLocalTime ? localLogonTime : utcLogonTime;
 
   if( !sessionTimeRange.isInRange(logonTime, logonDay) )
