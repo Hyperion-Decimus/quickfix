@@ -19,36 +19,15 @@
 **
 ****************************************************************************/
 
-#ifndef FIX_HTTPPARSER_H
-#define FIX_HTTPPARSER_H
+#ifndef FIX_EXCEPT_H
+#define FIX_EXCEPT_H
 
-#ifdef _MSC_VER
-#pragma warning( disable : 4503 4355 4786 4290 )
+#ifdef __cpp_noexcept_function_type
+#define NOEXCEPT noexcept
+#define EXCEPT(...) noexcept(false)
+#else
+#define NOEXCEPT throw()
+#define EXCEPT(...) throw(__VA_ARGS__)
 #endif
 
-#include "Exceptions.h"
-#include <iostream>
-#include <string>
-
-namespace FIX
-{
-/// Parses HTTP messages off an input stream.
-class HttpParser
-{
-public:
-  HttpParser() {}
-  ~HttpParser() {}
-
-  bool readHttpMessage( std::string& str )
-  EXCEPT( MessageParseError );
-
-  void addToStream( const char* str, size_t len )
-  { m_buffer.append( str, len ); }
-  void addToStream( const std::string& str )
-  { m_buffer.append( str ); }
-
-private:
-  std::string m_buffer;
-};
-}
-#endif //FIX_HTTPPARSER_H
+#endif
