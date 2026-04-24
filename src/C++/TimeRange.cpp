@@ -31,10 +31,13 @@ namespace FIX
   TimeRange::TimeRange( const UtcTimeOnly& startTime,
                         const UtcTimeOnly& endTime,
                         int startDay,
-                        int endDay )
+                        int endDay,
+                        int periodDays,
+                        int anchorJulianDate )
   : m_startTime( startTime ), m_endTime( endTime ),
     m_startDay( startDay ), m_endDay( endDay ),
-    m_useLocalTime( false )
+    m_useLocalTime( false ),
+    m_periodDays( periodDays ), m_anchorJulianDate( anchorJulianDate )
   {
     if( startDay > 0
         && endDay > 0
@@ -46,10 +49,13 @@ namespace FIX
   TimeRange::TimeRange( const LocalTimeOnly& startTime,
                         const LocalTimeOnly& endTime,
                         int startDay,
-                        int endDay )
+                        int endDay,
+                        int periodDays,
+                        int anchorJulianDate )
   : m_startTime( startTime ), m_endTime( endTime ),
     m_startDay( startDay ), m_endDay( endDay ),
-    m_useLocalTime( true )
+    m_useLocalTime( true ),
+    m_periodDays( periodDays ), m_anchorJulianDate( anchorJulianDate )
   {
     if( startDay > 0
         && endDay > 0
@@ -169,5 +175,94 @@ namespace FIX
     int absoluteDay1 = time1.getJulianDate() - time1.getWeekDay();
     int absoluteDay2 = time2.getJulianDate() - time2.getWeekDay();
     return absoluteDay1 == absoluteDay2;
+  }
+
+  bool TimeRange::isInRangeMultiWeek( const DateTime& startTime,
+                                      const DateTime& endTime,
+                                      int startDay,
+                                      int endDay,
+                                      int periodDays,
+                                      int anchorJulianDate,
+                                      const DateTime& time,
+                                      int day )
+  {
+    // Multi-week scheduling only supports startDay == endDay (enforced at
+    // SessionFactory::create). Fall through safely otherwise.
+    if( startDay != endDay )
+      return isInRange( startTime, endTime, startDay, endDay, time, day );
+
+    // If today is NOT the cycle weekday, the session is always active — the
+    // maintenance gap only occurs on the cycle weekday.
+    if( day != startDay )
+      return true;
+
+    // Today IS the cycle weekday. Is this particular occurrence a maintenance
+    // day? Maintenance days occur at julian dates of the form
+    // (anchor + k*periodDays) for integer k.
+    int daysDiff = time.getJulianDate() - anchorJulianDate;
+    int mod = daysDiff % periodDays;
+    if( mod < 0 ) mod += periodDays;
+    bool isMaintenanceDay = ( mod == 0 );
+
+    if( !isMaintenanceDay )
+    {
+      // Non-maintenance cycle weekday (e.g. mid-period Friday in biweekly).
+      return true;
+    }
+
+    // Maintenance day: apply the same wrap-around gap logic as the weekly path.
+    UtcTimeOnly timeOnly( time );
+    UtcTimeOnly startTimeOnly( startTime );
+    UtcTimeOnly endTimeOnly( endTime );
+    return timeOnly >= startTimeOnly || timeOnly <= endTimeOnly;
+  }
+
+  bool TimeRange::isInSameRangeMultiWeek( const DateTime& startTime,
+                                          const DateTime& endTime,
+                                          int startDay,
+                                          int endDay,
+                                          int periodDays,
+                                          int anchorJulianDate,
+                                          const DateTime& time1,
+                                          const DateTime& time2 )
+  {
+    // Both times must be in range for the session to be "the same".
+    if( !isInRangeMultiWeek( startTime, endTime, startDay, endDay,
+                             periodDays, anchorJulianDate, time1, time1.getWeekDay() ) )
+      return false;
+    if( !isInRangeMultiWeek( startTime, endTime, startDay, endDay,
+                             periodDays, anchorJulianDate, time2, time2.getWeekDay() ) )
+      return false;
+
+    // Two timestamps are in the same session iff they share a cycle index.
+    // Cycle boundary is at startTime on the anchor weekday; a time that's on
+    // the anchor weekday BEFORE startTime belongs to the previous cycle.
+    int daysSinceAnchor1 = time1.getJulianDate() - anchorJulianDate;
+    if( time1.getWeekDay() == startDay && startDay == endDay )
+    {
+      if( UtcTimeOnly( time1 ) < UtcTimeOnly( startTime ) )
+        daysSinceAnchor1 -= 1;
+    }
+    int daysSinceAnchor2 = time2.getJulianDate() - anchorJulianDate;
+    if( time2.getWeekDay() == startDay && startDay == endDay )
+    {
+      if( UtcTimeOnly( time2 ) < UtcTimeOnly( startTime ) )
+        daysSinceAnchor2 -= 1;
+    }
+
+    // Floor division (C++ integer division truncates toward zero, wrong for negatives).
+    int cycleIndex1;
+    if( daysSinceAnchor1 >= 0 )
+      cycleIndex1 = daysSinceAnchor1 / periodDays;
+    else
+      cycleIndex1 = -( ( -daysSinceAnchor1 + periodDays - 1 ) / periodDays );
+
+    int cycleIndex2;
+    if( daysSinceAnchor2 >= 0 )
+      cycleIndex2 = daysSinceAnchor2 / periodDays;
+    else
+      cycleIndex2 = -( ( -daysSinceAnchor2 + periodDays - 1 ) / periodDays );
+
+    return cycleIndex1 == cycleIndex2;
   }
 }

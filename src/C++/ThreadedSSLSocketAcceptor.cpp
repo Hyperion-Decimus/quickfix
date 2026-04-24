@@ -136,7 +136,7 @@ int ThreadedSSLSocketAcceptor::passPhraseHandleCB(char *buf, int bufsize, int ve
 
 ThreadedSSLSocketAcceptor::ThreadedSSLSocketAcceptor(
     Application &application, MessageStoreFactory &factory,
-    const SessionSettings &settings) throw(ConfigError)
+    const SessionSettings &settings) EXCEPT(ConfigError)
     : Acceptor(application, factory, settings), m_sslInit(false),
       m_verify(SSL_CLIENT_VERIFY_NOTSET), m_ctx(0), m_revocationStore(0)
 {
@@ -146,7 +146,7 @@ ThreadedSSLSocketAcceptor::ThreadedSSLSocketAcceptor(
 
 ThreadedSSLSocketAcceptor::ThreadedSSLSocketAcceptor(
     Application &application, MessageStoreFactory &factory,
-    const SessionSettings &settings, LogFactory &logFactory) throw(ConfigError)
+    const SessionSettings &settings, LogFactory &logFactory) EXCEPT(ConfigError)
     : Acceptor(application, factory, settings, logFactory), m_sslInit(false),
       m_verify(SSL_CLIENT_VERIFY_NOTSET), m_ctx(0), m_revocationStore(0)
 {

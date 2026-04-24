@@ -30,7 +30,7 @@
 namespace FIX
 {
 std::string Dictionary::getString( const std::string& key, bool capitalize ) const
-throw( ConfigError, FieldConvertError )
+EXCEPT(ConfigError, FieldConvertError )
 {
   Data::const_iterator i = m_data.find( string_toUpper(key) );
   if ( i == m_data.end() ) throw ConfigError( key + " not defined" );
@@ -43,7 +43,7 @@ throw( ConfigError, FieldConvertError )
 }
 
 int Dictionary::getInt( const std::string& key ) const
-throw( ConfigError, FieldConvertError )
+EXCEPT(ConfigError, FieldConvertError )
 {
   try
   {
@@ -56,7 +56,7 @@ throw( ConfigError, FieldConvertError )
 }
 
 double Dictionary::getDouble( const std::string& key ) const
-throw( ConfigError, FieldConvertError )
+EXCEPT(ConfigError, FieldConvertError )
 {
   try
   {
@@ -69,7 +69,7 @@ throw( ConfigError, FieldConvertError )
 }
 
 bool Dictionary::getBool( const std::string& key ) const
-throw( ConfigError, FieldConvertError )
+EXCEPT(ConfigError, FieldConvertError )
 {
   try
   {
@@ -82,7 +82,7 @@ throw( ConfigError, FieldConvertError )
 }
 
 int Dictionary::getDay( const std::string& key ) const
-throw( ConfigError, FieldConvertError )
+EXCEPT(ConfigError, FieldConvertError )
 {
   try
   {
@@ -103,6 +103,38 @@ throw( ConfigError, FieldConvertError )
     throw ConfigError( "Illegal value " + getString(key) + " for " + key );
   }
   return -1;
+}
+
+int Dictionary::getDate( const std::string& key ) const
+EXCEPT(ConfigError, FieldConvertError )
+{
+  std::string value = getString(key);
+
+  if( value.size() != 10 || value[4] != '-' || value[7] != '-' )
+    throw ConfigError( "Illegal value " + value + " for " + key + " (expected YYYY-MM-DD)" );
+
+  for( size_t i = 0; i < value.size(); ++i )
+  {
+    if( i == 4 || i == 7 ) continue;
+    if( !std::isdigit( static_cast<unsigned char>( value[i] ) ) )
+      throw ConfigError( "Illegal value " + value + " for " + key + " (expected YYYY-MM-DD)" );
+  }
+
+  int year = std::atoi( value.substr(0, 4).c_str() );
+  int month = std::atoi( value.substr(5, 2).c_str() );
+  int day = std::atoi( value.substr(8, 2).c_str() );
+
+  if( month < 1 || month > 12 )
+    throw ConfigError( "Illegal value " + value + " for " + key + " (month out of range)" );
+
+  static const int daysInMonth[] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+  int maxDay = daysInMonth[month - 1];
+  bool isLeap = ( year % 4 == 0 && year % 100 != 0 ) || ( year % 400 == 0 );
+  if( month == 2 && isLeap ) maxDay = 29;
+  if( day < 1 || day > maxDay )
+    throw ConfigError( "Illegal value " + value + " for " + key + " (day out of range)" );
+
+  return DateTime::julianDate( year, month, day );
 }
 
 void Dictionary::setString( const std::string& key, const std::string& value )

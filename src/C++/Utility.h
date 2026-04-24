@@ -26,6 +26,8 @@
 #pragma warning( disable : 4503 4355 4786 4290 )
 #endif
 
+#include "Except.h"
+
 #ifndef _MSC_VER
 #include "Allocator.h"
 #endif

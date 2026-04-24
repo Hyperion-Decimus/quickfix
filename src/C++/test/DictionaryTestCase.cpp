@@ -26,6 +26,7 @@
 
 #include <UnitTest++.h>
 #include <Dictionary.h>
+#include <FieldTypes.h>
 
 using namespace FIX;
 
@@ -123,6 +124,30 @@ TEST(merge)
   CHECK_EQUAL( "FIRSTVALUE", object.getString( "FIRSTKEY" ) );
   CHECK_EQUAL( "SECONDVALUE", object.getString( "SECONDKEY" ) );
   CHECK_EQUAL( "FIRST", object.getString( "THIRDKEY" ) );
+}
+
+TEST(setGetDate)
+{
+  Dictionary object;
+  object.setString( "DATE1", "2026-04-10" );
+  object.setString( "DATE2", "2000-01-01" );
+  object.setString( "DATELEAP", "2024-02-29" );
+  object.setString( "BADDATE_SHORT", "2026-4-1" );
+  object.setString( "BADDATE_WRONG_FORMAT", "04/10/2026" );
+  object.setString( "BADDATE_NOT_A_DATE", "hello" );
+  object.setString( "BADDATE_INVALID_MONTH", "2026-13-01" );
+  object.setString( "BADDATE_INVALID_DAY", "2026-02-30" );
+
+  CHECK_EQUAL( DateTime::julianDate(2026, 4, 10), object.getDate( "DATE1" ) );
+  CHECK_EQUAL( DateTime::julianDate(2000, 1, 1), object.getDate( "DATE2" ) );
+  CHECK_EQUAL( DateTime::julianDate(2024, 2, 29), object.getDate( "DATELEAP" ) );
+
+  CHECK_THROW( object.getDate( "MISSING" ), ConfigError );
+  CHECK_THROW( object.getDate( "BADDATE_SHORT" ), ConfigError );
+  CHECK_THROW( object.getDate( "BADDATE_WRONG_FORMAT" ), ConfigError );
+  CHECK_THROW( object.getDate( "BADDATE_NOT_A_DATE" ), ConfigError );
+  CHECK_THROW( object.getDate( "BADDATE_INVALID_MONTH" ), ConfigError );
+  CHECK_THROW( object.getDate( "BADDATE_INVALID_DAY" ), ConfigError );
 }
 
 }

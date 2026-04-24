@@ -35,10 +35,12 @@ class TimeRange
 {
 public:
   TimeRange( const UtcTimeOnly& startTime, const UtcTimeOnly& endTime,
-               int startDay = -1, int endDay = -1 );
+               int startDay = -1, int endDay = -1,
+               int periodDays = 7, int anchorJulianDate = -1 );
 
   TimeRange( const LocalTimeOnly& startTime, const LocalTimeOnly& endTime,
-               int startDay = -1, int endDay = -1 );
+               int startDay = -1, int endDay = -1,
+               int periodDays = 7, int anchorJulianDate = -1 );
 
   static bool isInRange( const UtcTimeOnly& start,
                          const UtcTimeOnly& end,
@@ -181,11 +183,33 @@ private:
                              int endDay,
                              const DateTime& time1,
                              const DateTime& time2 );
-public:  
+
+  static bool isInRangeMultiWeek( const DateTime& startTime,
+                                  const DateTime& endTime,
+                                  int startDay,
+                                  int endDay,
+                                  int periodDays,
+                                  int anchorJulianDate,
+                                  const DateTime& time,
+                                  int day );
+
+  static bool isInSameRangeMultiWeek( const DateTime& startTime,
+                                      const DateTime& endTime,
+                                      int startDay,
+                                      int endDay,
+                                      int periodDays,
+                                      int anchorJulianDate,
+                                      const DateTime& time1,
+                                      const DateTime& time2 );
+public:
   bool isInRange( const DateTime& dateTime, int day )
   {
     if( m_startDay < 0 && m_endDay < 0 )
       return isInRange( m_startTime, m_endTime, dateTime );
+    else if( m_periodDays > 7 )
+      return isInRangeMultiWeek
+        ( m_startTime, m_endTime, m_startDay, m_endDay,
+          m_periodDays, m_anchorJulianDate, dateTime, day );
     else
       return isInRange
         ( m_startTime, m_endTime, m_startDay, m_endDay, dateTime, day );
@@ -242,6 +266,10 @@ private:
   {
     if( m_startDay < 0 && m_endDay < 0 )
       return isInSameRange( m_startTime, m_endTime, time1, time2 );
+    else if( m_periodDays > 7 )
+      return isInSameRangeMultiWeek
+        ( m_startTime, m_endTime, m_startDay, m_endDay,
+          m_periodDays, m_anchorJulianDate, time1, time2 );
     else
       return isInSameRange
         ( m_startTime, m_endTime, m_startDay, m_endDay, time1, time2 );
@@ -252,6 +280,8 @@ private:
   int m_startDay;
   int m_endDay;
   bool m_useLocalTime;
+  int m_periodDays;
+  int m_anchorJulianDate;
 };
 }
 
