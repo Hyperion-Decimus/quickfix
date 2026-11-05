@@ -253,6 +253,7 @@ struct TLSFixture
 
   void prepareTLS()
   {
+    SSL_library_init();
     serverContext = SSL_CTX_new( SSLv23_server_method() );
     if( !serverContext
         || SSL_CTX_use_certificate_file(serverContext,
