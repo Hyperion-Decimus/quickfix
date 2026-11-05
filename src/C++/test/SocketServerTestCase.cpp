@@ -27,6 +27,11 @@
 #include <UnitTest++.h>
 #include <TestHelper.h>
 #include <SocketServer.h>
+#if defined(__linux__)
+#include <sys/stat.h>
+#include <unistd.h>
+#include <stdexcept>
+#endif
 #ifdef _MSC_VER
 #include <stdlib.h>
 #endif
@@ -143,3 +148,84 @@ TEST_FIXTURE(socketServerFixture, close)
 }
 
 }
+
+#if defined(__linux__)
+namespace
+{
+struct MonitorSocketPair
+{
+  MonitorSocketPair()
+  {
+    if( socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) )
+      throw std::runtime_error( "Cannot create monitor fixture socketpair" );
+  }
+  ~MonitorSocketPair()
+  {
+    for( int i = 0; i != 2; ++i ) if( sockets[i] >= 0 ) close( sockets[i] );
+  }
+  int sockets[2];
+};
+
+struct MonitorNotifications : SocketMonitor::Strategy
+{
+  MonitorNotifications()
+  : events(0), errors(0), monitorErrors(0), eventSocket(-1), errorSocket(-1),
+    received(0), byte(0) {}
+  void onConnect( SocketMonitor&, int ) {}
+  void onWrite( SocketMonitor&, int ) {}
+  void onEvent( SocketMonitor&, int socket )
+  {
+    ++events;
+    eventSocket = socket;
+    received = recv( socket, &byte, 1, 0 );
+  }
+  void onError( SocketMonitor&, int socket ) { ++errors; errorSocket = socket; }
+  void onError( SocketMonitor& ) { ++monitorErrors; }
+  int events, errors, monitorErrors, eventSocket, errorSocket;
+  ssize_t received;
+  char byte;
+};
+}
+
+SUITE(SocketMonitorTests)
+{
+TEST(dropNotificationMode)
+{
+  for( int notify = 0; notify != 2; ++notify )
+  {
+    SocketMonitor monitor;
+    MonitorSocketPair retired, replacement;
+    MonitorNotifications notifications;
+    const int descriptor = retired.sockets[0];
+    struct stat original, current;
+    if( fstat(descriptor, &original) || !monitor.addRead(descriptor) )
+      throw std::runtime_error( "Cannot monitor fixture descriptor" );
+    retired.sockets[0] = -1; // The monitor now owns this descriptor.
+    CHECK( notify ? monitor.drop(descriptor) : monitor.drop(descriptor, false) );
+    if( dup2(replacement.sockets[0], descriptor) != descriptor )
+      throw std::runtime_error( "Cannot place replacement on retired descriptor" );
+    close( replacement.sockets[0] );
+    replacement.sockets[0] = -1;
+    if( fstat(descriptor, &current) || !monitor.addRead(descriptor) )
+    {
+      close( descriptor );
+      throw std::runtime_error( "Cannot monitor replacement descriptor" );
+    }
+    CHECK( original.st_ino != current.st_ino );
+    const char byte = 'Q';
+    CHECK_EQUAL( 1, send(replacement.sockets[1], &byte, 1, MSG_NOSIGNAL) );
+    monitor.block( notifications, true, 0.0 );
+    CHECK_EQUAL( 0, notifications.monitorErrors );
+    CHECK_EQUAL( notify, notifications.errors );
+    CHECK_EQUAL( 1 - notify, notifications.events );
+    if( notify ) CHECK_EQUAL( descriptor, notifications.errorSocket );
+    else
+    {
+      CHECK_EQUAL( descriptor, notifications.eventSocket );
+      CHECK_EQUAL( 1, notifications.received );
+      CHECK_EQUAL( byte, notifications.byte );
+    }
+  }
+}
+}
+#endif

@@ -127,6 +127,42 @@
 namespace FIX
 {
 
+namespace
+{
+class SSLConnectGuard
+{
+public:
+  SSLConnectGuard( SocketMonitor& monitor, int socket )
+  : m_monitor( monitor ), m_socket( socket ), m_ssl( 0 ) {}
+
+  ~SSLConnectGuard()
+  {
+    if( !socket_isValid( m_socket ) ) return;
+
+    if( m_ssl )
+    {
+      BIO* bio = SSL_get_rbio( m_ssl );
+      if( bio ) BIO_set_close( bio, BIO_NOCLOSE );
+      SSL_free( m_ssl );
+    }
+
+    // An unpublished attempt has no connection to receive a disconnect callback.
+    m_monitor.drop( m_socket, false );
+  }
+
+  void setSSL( SSL* ssl ) { m_ssl = ssl; }
+  void release() { m_socket = -1; }
+
+private:
+  SSLConnectGuard( const SSLConnectGuard& );
+  SSLConnectGuard& operator=( const SSLConnectGuard& );
+
+  SocketMonitor& m_monitor;
+  int m_socket;
+  SSL* m_ssl;
+};
+}
+
 FIX::SSLSocketInitiator *initObj = 0;
 
 int SSLSocketInitiator::passwordHandleCB(char *buf, int bufsize, int verify, void *job)
@@ -301,8 +337,11 @@ void SSLSocketInitiator::doConnect( const SessionID& s, const Dictionary& d )
 
     log->onEvent( "Connecting to " + address + " on port " + IntConvertor::convert((unsigned short)port) + " (Source " + sourceAddress + ":" + IntConvertor::convert((unsigned short)sourcePort) + ")");
     int result = m_connector.connect( address, port, m_noDelay, m_sendBufSize, m_rcvBufSize, sourceAddress, sourcePort );
+    if( !socket_isValid( result ) ) return;
 
+    SSLConnectGuard guard( m_connector.getMonitor(), result );
     SSL *ssl = SSL_new(m_ctx);
+    guard.setSSL( ssl );
     if (ssl == 0)
     {
       log->onEvent("Failed to create ssl object");
@@ -337,6 +376,7 @@ void SSLSocketInitiator::doConnect( const SessionID& s, const Dictionary& d )
       rc = SSL_connect(ssl);
     }
 
+    guard.release();
     setPending( s );
     m_pendingConnections[ result ] = new SSLSocketConnection( *this, s, result, ssl, &m_connector.getMonitor() );
   }
