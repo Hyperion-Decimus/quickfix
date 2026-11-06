@@ -1,0 +1,16 @@
+src/C++/test/SSLSocketInitiatorTestCase.cpp
+  h_a960919c173e1d 25
+src/C++/test/SocketServerTestCase.cpp
+  h_a960919c173e1d 153
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f9a81cc77cec02e17568d5b1727df44202ce106f",
+  "prompts": {},
+  "humans": {
+    "h_a960919c173e1d": {
+      "author": "Jeffrey Tai <jeffreyhtai@gmail.com>"
+    }
+  }
+}
