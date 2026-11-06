@@ -1,0 +1,20 @@
+src/C++/SSLSocketInitiator.cpp
+  h_a960919c173e1d 359-360,385
+src/C++/SocketMonitor.cpp
+  h_a960919c173e1d 246,265
+src/C++/test/SSLSocketInitiatorTestCase.cpp
+  h_a960919c173e1d 15,41-64,243-245,247,530-585
+src/C++/test/SocketMonitorTestCase.cpp
+  h_a960919c173e1d 26-27,35,39-44,55,57,60,68-70,74,76-77,88-89,95-97
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "91db203d452e0ca620080b621f6a70dcbfcab915",
+  "prompts": {},
+  "humans": {
+    "h_a960919c173e1d": {
+      "author": "Jeffrey Tai <jeffreyhtai@gmail.com>"
+    }
+  }
+}
