@@ -55,8 +55,10 @@ public:
   bool addConnect( int socket );
   bool addRead( int socket );
   bool addWrite( int socket );
+  bool remove( int socket );
   bool drop( int socket );
   bool drop( int socket, bool notify );
+  void setReadEnabled( int socket, bool enabled );
   void signal( int socket );
   void unsignal( int socket );
   void block( Strategy& strategy, bool poll = 0, double timeout = 0.0 );
@@ -90,6 +92,7 @@ private:
   Sockets m_connectSockets;
   Sockets m_readSockets;
   Sockets m_writeSockets;
+  Sockets m_disabledReadSockets;
   Queue m_dropped;
 
 public:

@@ -95,12 +95,7 @@ bool SocketMonitor::addWrite( int s )
   return true;
 }
 
-bool SocketMonitor::drop( int s )
-{
-  return drop( s, true );
-}
-
-bool SocketMonitor::drop( int s, bool notify )
+bool SocketMonitor::remove( int s )
 {
   Sockets::iterator i = m_readSockets.find( s );
   Sockets::iterator j = m_writeSockets.find( s );
@@ -110,14 +105,35 @@ bool SocketMonitor::drop( int s, bool notify )
        j != m_writeSockets.end() ||
        k != m_connectSockets.end() )
   {
-    socket_close( s );
     m_readSockets.erase( s );
     m_writeSockets.erase( s );
     m_connectSockets.erase( s );
-    if( notify ) m_dropped.push( s );
+    m_disabledReadSockets.erase( s );
     return true;
   }
   return false;
+}
+
+bool SocketMonitor::drop( int s )
+{
+  return drop( s, true );
+}
+
+bool SocketMonitor::drop( int s, bool notify )
+{
+  if( !remove(s) ) return false;
+
+  socket_close( s );
+  if( notify ) m_dropped.push( s );
+  return true;
+}
+
+void SocketMonitor::setReadEnabled( int s, bool enabled )
+{
+  if( enabled )
+    m_disabledReadSockets.erase( s );
+  else if( m_readSockets.find(s) != m_readSockets.end() )
+    m_disabledReadSockets.insert( s );
 }
 
 inline timeval* SocketMonitor::getTimeval( bool poll, double timeout )
@@ -196,6 +212,9 @@ void SocketMonitor::block( Strategy& strategy, bool poll, double timeout )
   fd_set readSet;
   FD_ZERO( &readSet );
   buildSet( m_readSockets, readSet );
+  for( Sockets::const_iterator i = m_disabledReadSockets.begin();
+       i != m_disabledReadSockets.end(); ++i )
+    FD_CLR( *i, &readSet );
   fd_set writeSet;
   FD_ZERO( &writeSet );
   buildSet( m_connectSockets, writeSet );
@@ -241,7 +260,8 @@ void SocketMonitor::processReadSet( Strategy& strategy, fd_set& readSet )
       socket_recv( s, (char*)&socket, sizeof(socket) );
       addWrite( socket );
     }
-    else
+    else if( m_readSockets.find(s) != m_readSockets.end()
+             && m_disabledReadSockets.find(s) == m_disabledReadSockets.end() )
     {
       strategy.onEvent( *this, s );
     }
@@ -260,7 +280,8 @@ void SocketMonitor::processReadSet( Strategy& strategy, fd_set& readSet )
         socket_recv( s, (char*)&socket, sizeof(socket) );
         addWrite( socket );
       }
-      else
+      else if( m_readSockets.find(s) != m_readSockets.end()
+               && m_disabledReadSockets.find(s) == m_disabledReadSockets.end() )
       {
         strategy.onEvent( *this, s );
       }
@@ -280,29 +301,31 @@ void SocketMonitor::processWriteSet( Strategy& strategy, fd_set& writeSet )
       m_readSockets.insert( s );
       strategy.onConnect( *this, s );
     }
-    else
+    else if( m_writeSockets.find(s) != m_writeSockets.end() )
     {
       strategy.onWrite( *this, s );
     }
   }
 #else
   Sockets::iterator i;
+  Sockets writeSockets = m_writeSockets;
   Sockets sockets = m_connectSockets;
   for( i = sockets.begin(); i != sockets.end(); ++i )
   {
     int s = *i;
-    if ( !FD_ISSET( *i, &writeSet ) )
+    if ( !FD_ISSET( *i, &writeSet )
+         || m_connectSockets.find(s) == m_connectSockets.end() )
       continue;
     m_connectSockets.erase( s );
     m_readSockets.insert( s );
     strategy.onConnect( *this, s );
   }
 
-  sockets = m_writeSockets;
-  for( i = sockets.begin(); i != sockets.end(); ++i )
+  for( i = writeSockets.begin(); i != writeSockets.end(); ++i )
   {
     int s = *i;
-    if ( !FD_ISSET( *i, &writeSet ) )
+    if ( !FD_ISSET( *i, &writeSet )
+         || m_writeSockets.find(s) == m_writeSockets.end() )
       continue;
     strategy.onWrite( *this, s );
   }
@@ -315,7 +338,8 @@ void SocketMonitor::processExceptSet( Strategy& strategy, fd_set& exceptSet )
   for ( unsigned i = 0; i < exceptSet.fd_count; ++i )
   {
     int s = exceptSet.fd_array[ i ];
-    strategy.onError( *this, s );
+    if( m_connectSockets.find(s) != m_connectSockets.end() )
+      strategy.onError( *this, s );
   }
 #else
     Sockets::iterator i;
@@ -323,7 +347,8 @@ void SocketMonitor::processExceptSet( Strategy& strategy, fd_set& exceptSet )
     for ( i = sockets.begin(); i != sockets.end(); ++i )
     {
       int s = *i;
-      if ( !FD_ISSET( *i, &exceptSet ) )
+      if ( !FD_ISSET( *i, &exceptSet )
+           || m_connectSockets.find(s) == m_connectSockets.end() )
         continue;
       strategy.onError( *this, s );
     }

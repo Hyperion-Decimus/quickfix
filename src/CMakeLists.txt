@@ -48,7 +48,10 @@ ${CMAKE_SOURCE_DIR}/src/C++/test/SessionTestCase.cpp
 ${CMAKE_SOURCE_DIR}/src/C++/test/SettingsTestCase.cpp
 ${CMAKE_SOURCE_DIR}/src/C++/test/SocketAcceptorTestCase.cpp
 ${CMAKE_SOURCE_DIR}/src/C++/test/SocketConnectorTestCase.cpp
+${CMAKE_SOURCE_DIR}/src/C++/test/SocketMonitorTestCase.cpp
 ${CMAKE_SOURCE_DIR}/src/C++/test/SocketServerTestCase.cpp
+${CMAKE_SOURCE_DIR}/src/C++/test/SSLSocketInitiatorTestCase.cpp
+${CMAKE_SOURCE_DIR}/src/C++/test/SSLSocketHandshakeTestCase.cpp
 ${CMAKE_SOURCE_DIR}/src/C++/test/StringUtilitiesTestCase.cpp
 ${CMAKE_SOURCE_DIR}/src/C++/test/TestHelper.cpp
 ${CMAKE_SOURCE_DIR}/src/C++/test/TimeRangeTestCase.cpp
