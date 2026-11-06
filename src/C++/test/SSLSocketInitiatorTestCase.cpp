@@ -22,7 +22,7 @@
 #include <sstream>
 #include <stdexcept>
 
-namespace
+SUITE(SSLSocketInitiatorTests)
 {
 typedef std::map<int, std::string> TLSDescriptors;
 
@@ -408,8 +408,6 @@ struct TLSFixture
   TLSDescriptors fixtureOnly;
 };
 
-SUITE(SSLSocketInitiatorTests)
-{
 TEST_FIXTURE(TLSFixture, fatalHandshakeReleasesAttempt)
 {
   const FIX::SessionID id( "FIX.4.4", "TLSLOCAL", "TLSPEER" );
@@ -503,7 +501,6 @@ TEST_FIXTURE(TLSFixture, failedAttemptDoesNotDisconnectReusedSocket)
   joinPeer();
   CHECK_EQUAL( 2, lifetime->released );
   CHECK( fixtureOnly == tlsDescriptors() );
-}
 }
 }
 

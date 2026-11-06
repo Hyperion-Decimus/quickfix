@@ -150,7 +150,7 @@ TEST_FIXTURE(socketServerFixture, close)
 }
 
 #if defined(__linux__)
-namespace
+SUITE(SocketMonitorTests)
 {
 struct MonitorSocketPair
 {
@@ -185,10 +185,7 @@ struct MonitorNotifications : SocketMonitor::Strategy
   ssize_t received;
   char byte;
 };
-}
 
-SUITE(SocketMonitorTests)
-{
 TEST(dropNotificationMode)
 {
   for( int notify = 0; notify != 2; ++notify )

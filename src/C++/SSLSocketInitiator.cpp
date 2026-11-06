@@ -127,8 +127,6 @@
 namespace FIX
 {
 
-namespace
-{
 class SSLConnectGuard
 {
 public:
@@ -161,7 +159,6 @@ private:
   int m_socket;
   SSL* m_ssl;
 };
-}
 
 FIX::SSLSocketInitiator *initObj = 0;
 
