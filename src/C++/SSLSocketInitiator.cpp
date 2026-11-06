@@ -388,23 +388,25 @@ void SSLSocketInitiator::onConnect( SocketConnector& connector, int s )
     int err = SSL_get_error( ssl, rc );
     if( err == SSL_ERROR_WANT_READ )
     {
-      connector.getMonitor().setReadEnabled( s, true );
       connector.getMonitor().unsignal( s );
     }
     else if( err == SSL_ERROR_WANT_WRITE )
     {
-      connector.getMonitor().setReadEnabled( s, false );
-      connector.getMonitor().addWrite( s );
+      connector.getMonitor().remove( s );
+      connector.getMonitor().addConnect( s );
     }
     else
     {
-      getLog()->onEvent("SSL_connect failed with SSL error " + IntConvertor::convert(err));
+      try
+      {
+        getLog()->onEvent("SSL_connect failed with SSL error " + IntConvertor::convert(err));
+      }
+      catch( std::exception& ) {}
       onDisconnect( connector, s );
     }
     return;
   }
 
-  connector.getMonitor().setReadEnabled( s, true );
   connector.getMonitor().unsignal( s );
   try
   {
@@ -420,7 +422,7 @@ void SSLSocketInitiator::onConnect( SocketConnector& connector, int s )
   setConnected( pSocketConnection->getSession()->getSessionID() );
   pSocketConnection->onTimeout();
   if( !pSocketConnection->read(connector) )
-    connector.getMonitor().drop( s );
+    onDisconnect( connector, s );
 }
 
 void SSLSocketInitiator::onWrite( SocketConnector& connector, int s )

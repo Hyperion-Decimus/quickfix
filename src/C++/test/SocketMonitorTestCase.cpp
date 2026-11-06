@@ -13,7 +13,7 @@
 #include <SocketMonitor.h>
 #include <Utility.h>
 
-SUITE(SocketMonitorTests)
+SUITE(SocketMonitorRegistrationTests)
 {
 struct monitorSocketRuntime
 {
@@ -23,8 +23,8 @@ struct monitorSocketRuntime
 
 struct monitorFixture : FIX::SocketMonitor::Strategy, monitorSocketRuntime
 {
-  monitorFixture() : sockets( FIX::socket_createpair() ), writes( 0 ), reads( 0 ),
-                     errors( 0 ), byte( 0 ), suppressOnWrite( false ) {}
+  monitorFixture() : sockets( FIX::socket_createpair() ), connects( 0 ), writes( 0 ),
+                     reads( 0 ), errors( 0 ), byte( 0 ), reconnectOnWrite( false ) {}
 
   ~monitorFixture()
   {
@@ -32,12 +32,16 @@ struct monitorFixture : FIX::SocketMonitor::Strategy, monitorSocketRuntime
     FIX::socket_close( sockets.second );
   }
 
-  void onConnect( FIX::SocketMonitor&, int ) {}
+  void onConnect( FIX::SocketMonitor&, int ) { ++connects; }
   void onWrite( FIX::SocketMonitor& monitor, int socket )
   {
     ++writes;
-    if( suppressOnWrite ) monitor.setReadEnabled( socket, false );
-    monitor.unsignal( socket );
+    if( reconnectOnWrite )
+    {
+      monitor.remove( socket );
+      monitor.addConnect( socket );
+    }
+    else monitor.unsignal( socket );
   }
   void onEvent( FIX::SocketMonitor&, int socket )
   {
@@ -48,12 +52,12 @@ struct monitorFixture : FIX::SocketMonitor::Strategy, monitorSocketRuntime
   void onError( FIX::SocketMonitor& ) { ++errors; }
 
   std::pair<int, int> sockets;
-  int writes, reads, errors;
+  int connects, writes, reads, errors;
   char byte;
-  bool suppressOnWrite;
+  bool reconnectOnWrite;
 };
 
-TEST_FIXTURE(monitorFixture, readInterestAndRemovalPreserveSocketOwnership)
+TEST_FIXTURE(monitorFixture, connectInterestAndRemovalPreserveSocketOwnership)
 {
   FIX::SocketMonitor monitor;
   CHECK( sockets.first >= 0 && sockets.second >= 0 );
@@ -61,36 +65,36 @@ TEST_FIXTURE(monitorFixture, readInterestAndRemovalPreserveSocketOwnership)
   CHECK( monitor.addWrite(sockets.first) );
   CHECK_EQUAL( 1, FIX::socket_send(sockets.second, "r", 1) );
 
-  // Both directions are ready in this select. The write callback changes read
-  // interest before dispatch of the already selected read event.
-  suppressOnWrite = true;
+  // Both directions are ready in this select. Rearming connect interest in
+  // the write callback must suppress the already selected stale read event.
+  reconnectOnWrite = true;
   monitor.block( *this, true );
   CHECK_EQUAL( 1, writes );
   CHECK_EQUAL( 0, reads );
-  CHECK_EQUAL( 1U, monitor.numSockets() );
-
-  CHECK( monitor.addWrite(sockets.first) );
+  CHECK_EQUAL( 0, connects );
   monitor.block( *this, true );
-  CHECK_EQUAL( 2, writes );
+  CHECK_EQUAL( 1, connects );
+  CHECK_EQUAL( 1, writes );
   CHECK_EQUAL( 0, reads );
-  monitor.setReadEnabled( sockets.first, true );
   monitor.block( *this, true );
   CHECK_EQUAL( 1, reads );
   CHECK_EQUAL( 'r', byte );
 
   CHECK( monitor.addWrite(sockets.first) );
-  monitor.setReadEnabled( sockets.first, false );
   CHECK( monitor.remove(sockets.first) );
   CHECK_EQUAL( 0U, monitor.numSockets() );
   CHECK_EQUAL( 1, FIX::socket_send(sockets.second, "s", 1) );
   monitor.block( *this, true );
-  CHECK_EQUAL( 2, writes );
+  CHECK_EQUAL( 1, connects );
+  CHECK_EQUAL( 1, writes );
   CHECK_EQUAL( 1, reads );
   CHECK_EQUAL( 0, errors );
   CHECK_EQUAL( 1, FIX::socket_recv(sockets.first, &byte, 1) );
   CHECK_EQUAL( 's', byte );
 
-  CHECK( monitor.addRead(sockets.first) );
+  CHECK( monitor.addConnect(sockets.first) );
+  monitor.block( *this, true );
+  CHECK_EQUAL( 2, connects );
   CHECK_EQUAL( 1, FIX::socket_send(sockets.second, "t", 1) );
   monitor.block( *this, true );
   CHECK_EQUAL( 2, reads );

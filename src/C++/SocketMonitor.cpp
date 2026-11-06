@@ -108,7 +108,6 @@ bool SocketMonitor::remove( int s )
     m_readSockets.erase( s );
     m_writeSockets.erase( s );
     m_connectSockets.erase( s );
-    m_disabledReadSockets.erase( s );
     return true;
   }
   return false;
@@ -126,14 +125,6 @@ bool SocketMonitor::drop( int s, bool notify )
   socket_close( s );
   if( notify ) m_dropped.push( s );
   return true;
-}
-
-void SocketMonitor::setReadEnabled( int s, bool enabled )
-{
-  if( enabled )
-    m_disabledReadSockets.erase( s );
-  else if( m_readSockets.find(s) != m_readSockets.end() )
-    m_disabledReadSockets.insert( s );
 }
 
 inline timeval* SocketMonitor::getTimeval( bool poll, double timeout )
@@ -212,9 +203,6 @@ void SocketMonitor::block( Strategy& strategy, bool poll, double timeout )
   fd_set readSet;
   FD_ZERO( &readSet );
   buildSet( m_readSockets, readSet );
-  for( Sockets::const_iterator i = m_disabledReadSockets.begin();
-       i != m_disabledReadSockets.end(); ++i )
-    FD_CLR( *i, &readSet );
   fd_set writeSet;
   FD_ZERO( &writeSet );
   buildSet( m_connectSockets, writeSet );
@@ -260,8 +248,7 @@ void SocketMonitor::processReadSet( Strategy& strategy, fd_set& readSet )
       socket_recv( s, (char*)&socket, sizeof(socket) );
       addWrite( socket );
     }
-    else if( m_readSockets.find(s) != m_readSockets.end()
-             && m_disabledReadSockets.find(s) == m_disabledReadSockets.end() )
+    else if( m_readSockets.find(s) != m_readSockets.end() )
     {
       strategy.onEvent( *this, s );
     }
@@ -280,8 +267,7 @@ void SocketMonitor::processReadSet( Strategy& strategy, fd_set& readSet )
         socket_recv( s, (char*)&socket, sizeof(socket) );
         addWrite( socket );
       }
-      else if( m_readSockets.find(s) != m_readSockets.end()
-               && m_disabledReadSockets.find(s) == m_disabledReadSockets.end() )
+      else if( m_readSockets.find(s) != m_readSockets.end() )
       {
         strategy.onEvent( *this, s );
       }

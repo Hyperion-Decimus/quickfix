@@ -12,6 +12,7 @@
 #if (HAVE_SSL > 0)
 
 #include <UnitTest++.h>
+#include <TimeHelpers.h>
 #include <SSLSocketInitiator.h>
 #include <MessageStore.h>
 #include <Parser.h>
@@ -35,6 +36,30 @@ void waitReadable( int socket )
   // A failure watchdog for transport setup, never an elapsed-time oracle.
   timeval watchdog = { 5, 0 };
   requireTLSFixture( ::select( socket + 1, &ready, 0, 0, &watchdog ) > 0 );
+}
+
+void waitTLSAlert( SSL* client )
+{
+  // Earlier final-flight bytes cannot satisfy this complete TLS 1.2 alert handoff.
+  int socket = SSL_get_fd( client );
+  requireTLSFixture( socket >= 0 );
+  UnitTest::Timer watchdog;
+  watchdog.Start();
+  waitReadable( socket );
+  do
+  {
+    unsigned char wire[4096];
+    int size = ::recv( socket, reinterpret_cast<char*>(wire), sizeof(wire), MSG_PEEK );
+    requireTLSFixture( size > 0 );
+    for( int record = 0; record + SSL3_RT_HEADER_LENGTH <= size; )
+    {
+      int end = record + SSL3_RT_HEADER_LENGTH + (wire[record + 3] << 8) + wire[record + 4];
+      if( end > size ) break;
+      if( wire[record] == SSL3_RT_ALERT ) return;
+      record = end;
+    }
+  } while( watchdog.GetTimeInMs() < 5000 );
+  requireTLSFixture( false );
 }
 
 struct HandshakeSocketRuntime
@@ -215,8 +240,11 @@ struct HandshakeApplication : FIX::NullApplication
   void onLogon( const FIX::SessionID& session )
   { loggedOn.insert( session ); }
 
+  void onLogout( const FIX::SessionID& session )
+  { loggedOut.insert( session ); }
+
   int logons;
-  std::set<FIX::SessionID> loggedOn;
+  std::set<FIX::SessionID> loggedOn, loggedOut;
 };
 
 // Native OpenSSL callbacks withhold one real client write. The next writable
@@ -497,6 +525,62 @@ TEST(fatalPendingHandshakeClosesAndFreshAttemptLogsOn)
   CHECK_EQUAL( "A_SILENT", peer.sender );
   CHECK_EQUAL( 1U, application.loggedOn.size() );
   CHECK_EQUAL( 1, application.logons );
+  initiator.stop( true );
+}
+
+TEST(handshakeCloseNotifyRetiresSessionBeforeNextPoll)
+{
+  HandshakeContext context;
+#ifdef SSL_OP_NO_TLSv1_3
+  SSL_CTX_set_options( context.context, SSL_OP_NO_TLSv1_3 );
+#endif
+  HandshakePeer peer;
+  HandshakeApplication application;
+  FIX::MemoryStoreFactory store;
+  FIX::SessionSettings settings = handshakeSettings( peer.port );
+  FIX::Dictionary defaults = settings.get();
+  defaults.setInt( "ReconnectInterval", 0 );
+  settings.set( defaults );
+  FIX::SSLSocketInitiator initiator( application, store, settings );
+  FIX::SessionID session( "FIX.4.4", "A_SILENT", "LOCAL" );
+  {
+    HandshakeClient client;
+    CHECK( initiator.poll( 0 ) );
+    peer.accept( initiator );
+    requireTLSFixture( client.client != 0 );
+    SSL_set_read_ahead( client.client, 1 );
+    for( int turn = 0; turn < 32; ++turn )
+    {
+      peer.step( context.context );
+      if( SSL_is_init_finished(peer.ssl) ) break;
+      initiator.poll( 0 );
+    }
+    requireTLSFixture( SSL_is_init_finished(peer.ssl) != 0 );
+    // Queue close_notify with the last server flight, before the client
+    // completes TLS and immediately reads its already buffered first record.
+    ERR_clear_error();
+    requireTLSFixture( SSL_shutdown(peer.ssl) == 0 );
+    waitTLSAlert( client.client );
+    CHECK( initiator.poll( 0 ) );
+    CHECK( application.loggedOut.count(session) == 1 );
+    CHECK( application.loggedOn.empty() );
+  }
+  CHECK( peer.closed() );
+  SSL_free( peer.ssl );
+  peer.ssl = 0;
+  FIX::socket_close( peer.socket );
+  peer.socket = -1;
+
+  CHECK( initiator.poll( 0 ) );
+  CHECK( initiator.poll( 0 ) );
+  peer.accept( initiator );
+  for( int turn = 0; turn < 32 && application.loggedOn.empty(); ++turn )
+  {
+    peer.step( context.context );
+    initiator.poll( 0 );
+  }
+  CHECK( peer.receivedLogon );
+  CHECK_EQUAL( 1U, application.loggedOn.size() );
   initiator.stop( true );
 }
 }
