@@ -12,6 +12,7 @@
 #include <UnitTest++.h>
 #include <SSLSocketInitiator.h>
 #include <MessageStore.h>
+#include <Session.h>
 #include <dirent.h>
 #include <unistd.h>
 #include <cstdlib>
@@ -65,8 +66,8 @@ TLSDescriptors tlsDescriptors()
 
 struct TLSLifetime
 {
-  TLSLifetime() : allocated(0), released(0), tagFailures(0), cancelled(false) {}
-  int allocated, released, tagFailures;
+  TLSLifetime() : allocated(0), released(0), tagFailures(0), logonRequests(0), cancelled(false) {}
+  int allocated, released, tagFailures, logonRequests;
   bool cancelled;
 };
 
@@ -114,6 +115,7 @@ void tlsReleased( void*, void* tag, CRYPTO_EX_DATA*, int, long, void* argument )
   TLSLifetime* lifetime = static_cast<TLSLifetime*>( tag );
   pthread_mutex_lock( &ledger.mutex );
   if( lifetime && lifetime != &ledger.excluded ) ++lifetime->released;
+  pthread_cond_broadcast( &ledger.changed );
   pthread_mutex_unlock( &ledger.mutex );
 }
 
@@ -173,10 +175,20 @@ FIX::SessionSettings tlsSettings( unsigned short port, bool paired = false )
 class TLSApplication : public FIX::NullApplication
 {
 public:
-  TLSApplication() : logons(0), logouts(0) {}
+  TLSApplication( TLSLedger& ledger ) : logons(0), logouts(0), ledger(ledger) {}
   void onLogon( const FIX::SessionID& ) { ++logons; }
   void onLogout( const FIX::SessionID& ) { ++logouts; }
+  void toAdmin( FIX::Message& message, const FIX::SessionID& )
+  {
+    if( message.getHeader().getField(FIX::FIELD::MsgType) != "A" ) return;
+    pthread_mutex_lock( &ledger.mutex );
+    if( ledger.active ) ++ledger.active->logonRequests;
+    pthread_cond_broadcast( &ledger.changed );
+    pthread_mutex_unlock( &ledger.mutex );
+  }
   int logons, logouts;
+private:
+  TLSLedger& ledger;
 };
 
 class TLSConnectOnce : public FIX::SSLSocketInitiator
@@ -188,12 +200,12 @@ public:
   bool pending( const FIX::SessionID& id ) { return isPending(id); }
   bool connected( const FIX::SessionID& id ) { return isConnected(id); }
   bool disconnected( const FIX::SessionID& id ) { return isDisconnected(id); }
+  void connectOnce() { connect(); }
   TLSDescriptors before;
-private:
-  void onStart()
+  void startObserved()
   {
     before = tlsDescriptors();
-    connect();
+    start();
   }
 };
 
@@ -202,8 +214,9 @@ struct TLSFixture
   enum PeerMode { invalidTLS, successfulTLS, reusedSocket };
 
   TLSFixture()
-  : ledger(tlsLedger()), lifetime(0), initiator(0), running(false),
-    peerOK(true), accepts(0), mode(invalidTLS), ready(false), released(false),
+  : ledger(tlsLedger()), lifetime(0), application(ledger), initiator(0), running(false),
+    peerOK(true), accepts(0), acceptedReady(0), mode(invalidTLS), ready(false),
+    invalidReady(false), released(false),
     serverContext(0), serverSSL(0)
   {
     pthread_mutex_init( &peerMutex, 0 );
@@ -275,6 +288,8 @@ struct TLSFixture
     mode = peerMode;
     peerOK = true;
     ready = released = false;
+    acceptedReady = 0;
+    invalidReady = false;
     pthread_mutex_lock( &ledger.mutex );
     ledger.active = lifetime;
     pthread_mutex_unlock( &ledger.mutex );
@@ -285,9 +300,75 @@ struct TLSFixture
 
   void waitPeerReady()
   {
+    struct timespec deadline;
+    clock_gettime( CLOCK_REALTIME, &deadline );
+    deadline.tv_sec += 5;
     pthread_mutex_lock( &peerMutex );
-    while( !ready ) pthread_cond_wait( &peerChanged, &peerMutex );
+    int result = 0;
+    while( !result && !ready )
+      result = pthread_cond_timedwait( &peerChanged, &peerMutex, &deadline );
+    const bool complete = ready;
     pthread_mutex_unlock( &peerMutex );
+    if( !complete ) throw std::runtime_error( "TLS peer did not complete fixture handoff" );
+  }
+
+  void waitAccepted( int count )
+  {
+    struct timespec deadline;
+    clock_gettime( CLOCK_REALTIME, &deadline );
+    deadline.tv_sec += 5;
+    pthread_mutex_lock( &peerMutex );
+    int result = 0;
+    while( !result && acceptedReady < count && !ready )
+      result = pthread_cond_timedwait( &peerChanged, &peerMutex, &deadline );
+    const bool complete = acceptedReady >= count;
+    pthread_mutex_unlock( &peerMutex );
+    if( !complete ) throw std::runtime_error( "TLS peer did not accept fixture connection" );
+  }
+
+  void waitInvalidInput()
+  {
+    struct timespec deadline;
+    clock_gettime( CLOCK_REALTIME, &deadline );
+    deadline.tv_sec += 5;
+    pthread_mutex_lock( &peerMutex );
+    int result = 0;
+    while( !result && !invalidReady && !ready )
+      result = pthread_cond_timedwait( &peerChanged, &peerMutex, &deadline );
+    const bool complete = invalidReady;
+    pthread_mutex_unlock( &peerMutex );
+    if( !complete ) throw std::runtime_error( "TLS peer did not send fixture input" );
+  }
+
+  void pollPending( const FIX::SessionID& id, int slot )
+  {
+    for( int turn = 0; turn != 32 && initiator->pending(id); ++turn )
+    {
+      initiator->poll( 0 );
+      if( !initiator->pending(id) ) return;
+      fd_set readable;
+      FD_ZERO( &readable );
+      FD_SET( clientSockets[slot], &readable );
+      struct timeval timeout = { 5, 0 };
+      if( select(clientSockets[slot] + 1, &readable, 0, 0, &timeout) != 1 )
+        throw std::runtime_error( "TLS client did not receive fixture input" );
+    }
+  }
+
+  void waitClient( int releases, int logonRequests )
+  {
+    struct timespec deadline;
+    clock_gettime( CLOCK_REALTIME, &deadline );
+    deadline.tv_sec += 5;
+    pthread_mutex_lock( &ledger.mutex );
+    int result = 0;
+    while( !result && (lifetime->released < releases
+                       || lifetime->logonRequests < logonRequests) )
+      result = pthread_cond_timedwait( &ledger.changed, &ledger.mutex, &deadline );
+    const bool complete = lifetime->released >= releases
+                       && lifetime->logonRequests >= logonRequests;
+    pthread_mutex_unlock( &ledger.mutex );
+    if( !complete ) throw std::runtime_error( "TLS client did not complete fixture handoff" );
   }
 
   void releasePeer()
@@ -351,8 +432,18 @@ struct TLSFixture
   {
     TLSFixture& fixture = *static_cast<TLSFixture*>( argument );
     fixture.peerOK = fixture.acceptPeer( 0 );
+    pthread_mutex_lock( &fixture.peerMutex );
+    fixture.acceptedReady = fixture.accepts;
+    pthread_cond_broadcast( &fixture.peerChanged );
+    pthread_mutex_unlock( &fixture.peerMutex );
     if( fixture.peerOK && fixture.mode != successfulTLS )
+    {
       fixture.peerOK = fixture.sendInvalidTLS( 0 );
+      pthread_mutex_lock( &fixture.peerMutex );
+      fixture.invalidReady = fixture.peerOK;
+      pthread_cond_broadcast( &fixture.peerChanged );
+      pthread_mutex_unlock( &fixture.peerMutex );
+    }
     if( fixture.peerOK && fixture.mode == reusedSocket )
     {
       // Keep A's peer open. Accept B only once SSL_new proves that B has
@@ -363,6 +454,10 @@ struct TLSFixture
       const bool cancelled = fixture.lifetime->cancelled;
       pthread_mutex_unlock( &fixture.ledger.mutex );
       fixture.peerOK = !cancelled && fixture.acceptPeer( 1 );
+      pthread_mutex_lock( &fixture.peerMutex );
+      fixture.acceptedReady = fixture.accepts;
+      pthread_cond_broadcast( &fixture.peerChanged );
+      pthread_mutex_unlock( &fixture.peerMutex );
     }
     if( fixture.peerOK && fixture.mode != invalidTLS )
     {
@@ -400,9 +495,9 @@ struct TLSFixture
   int peerSockets[2], clientSockets[2];
   std::string peerIdentities[2], clientIdentities[2];
   bool peerOK;
-  int accepts;
+  int accepts, acceptedReady;
   PeerMode mode;
-  bool ready, released;
+  bool ready, invalidReady, released;
   SSL_CTX* serverContext;
   SSL* serverSSL;
   TLSDescriptors fixtureOnly;
@@ -414,8 +509,10 @@ TEST_FIXTURE(TLSFixture, fatalHandshakeReleasesAttempt)
   for( int attempt = 1; attempt <= 2; ++attempt )
   {
     startPeer();
-    initiator->block();
+    initiator->startObserved();
+    waitClient( attempt, 0 );
     joinPeer();
+    initiator->stop( true );
     CHECK( peerOK );
     CHECK_EQUAL( attempt, accepts );
     CHECK( initiator->before == tlsDescriptors() );
@@ -434,14 +531,15 @@ TEST_FIXTURE(TLSFixture, successfulHandshakeTransfersOwnership)
 {
   prepareTLS();
   startPeer( successfulTLS );
-  initiator->block();
+  initiator->startObserved();
   waitPeerReady();
+  waitClient( 0, 1 );
 
   const FIX::SessionID id( "FIX.4.4", "TLSLOCAL", "TLSPEER" );
   CHECK( peerOK );
   CHECK_EQUAL( 1, accepts );
-  CHECK( initiator->pending(id) );
-  CHECK( !initiator->connected(id) );
+  CHECK( !initiator->pending(id) );
+  CHECK( initiator->connected(id) );
   CHECK( !initiator->disconnected(id) );
   CHECK_EQUAL( 1, lifetime->allocated );
   CHECK_EQUAL( 0, lifetime->released );
@@ -468,8 +566,20 @@ TEST_FIXTURE(TLSFixture, failedAttemptDoesNotDisconnectReusedSocket)
   initiator = new TLSConnectOnce( application, store, tlsSettings(listener.port, true) );
   prepareTLS();
   const TLSDescriptors before = tlsDescriptors();
+  const FIX::SessionID failed( "FIX.4.4", "TLSLOCAL", "TLSA" );
+  const FIX::SessionID replacement( "FIX.4.4", "TLSLOCAL", "TLSB" );
+  FIX::Session::lookupSession(replacement)->logout();
   startPeer( reusedSocket );
-  CHECK( initiator->poll(0.0) );
+  CHECK( initiator->poll(0) );
+  waitAccepted( 1 );
+  CHECK( initiator->poll(0) );
+  waitInvalidInput();
+  pollPending( failed, 0 );
+  FIX::Session::lookupSession(failed)->logout();
+  FIX::Session::lookupSession(replacement)->logon();
+  initiator->connectOnce();
+  waitAccepted( 2 );
+  pollPending( replacement, 1 );
   waitPeerReady();
 
   CHECK( peerOK );
@@ -477,8 +587,6 @@ TEST_FIXTURE(TLSFixture, failedAttemptDoesNotDisconnectReusedSocket)
   CHECK( clientSockets[0] >= 0 );
   CHECK_EQUAL( clientSockets[0], clientSockets[1] );
   CHECK( clientIdentities[0] != clientIdentities[1] );
-  const FIX::SessionID failed( "FIX.4.4", "TLSLOCAL", "TLSA" );
-  const FIX::SessionID replacement( "FIX.4.4", "TLSLOCAL", "TLSB" );
   CHECK( initiator->disconnected(failed) );
   CHECK( !initiator->pending(failed) );
   CHECK( !initiator->connected(failed) );

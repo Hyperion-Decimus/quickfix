@@ -194,13 +194,10 @@ EXCEPT(ConfigError )
 
 SSLSocketInitiator::~SSLSocketInitiator()
 {
+  clearPendingConnections();
   SocketConnections::iterator i;
   for (i = m_connections.begin();
        i != m_connections.end(); ++i)
-    delete i->second;
-
-  for (i = m_pendingConnections.begin();
-       i != m_pendingConnections.end(); ++i)
     delete i->second;
 
   if (m_sslInit)
@@ -274,12 +271,15 @@ EXCEPT( RuntimeError )
 
 void SSLSocketInitiator::onStart()
 {
+  clearPendingConnections();
   connect();
 
   while ( !isStopped() ) {
     m_connector.block( *this, false, 1.0 );
     onTimeout( m_connector );
   }
+
+  clearPendingConnections();
 
   time_t start = 0;
   time_t now = 0;
@@ -300,6 +300,7 @@ bool SSLSocketInitiator::onPoll( double timeout )
 
   if( isStopped() )
   {
+    clearPendingConnections();
     if( start == 0 )
       ::time( &start );
     if( !isLoggedOn() )
@@ -353,47 +354,84 @@ void SSLSocketInitiator::doConnect( const SessionID& s, const Dictionary& d )
     }
     SSL_set_bio(ssl, sbio, sbio);
 
-    ERR_clear_error();
-    // Do the SSL handshake.
-    int rc = SSL_connect(ssl);
-    while (rc <= 0)
-    {
-      int err = SSL_get_error(ssl, rc);
-      if ((err == SSL_ERROR_WANT_READ) ||
-          (err == SSL_ERROR_WANT_WRITE))
-      {
-        errno = EINTR;
-      }
-      else
-      {
-        getLog()->onEvent("SSL_connect failed with SSL error " + IntConvertor::convert(err));
-        return;
-      }
-      ERR_clear_error();
-      rc = SSL_connect(ssl);
-    }
-
-    guard.release();
     setPending( s );
     m_pendingConnections[ result ] = new SSLSocketConnection( *this, s, result, ssl, &m_connector.getMonitor() );
+    guard.release();
   }
   catch ( std::exception& ) {}
 }
 
-void SSLSocketInitiator::onConnect( SocketConnector&, int s )
+void SSLSocketInitiator::clearPendingConnections()
+{
+  while( !m_pendingConnections.empty() )
+    onDisconnect( m_connector, m_pendingConnections.begin()->first );
+}
+
+void SSLSocketInitiator::onConnect( SocketConnector& connector, int s )
 {
   SocketConnections::iterator i = m_pendingConnections.find( s );
   if( i == m_pendingConnections.end() ) return;
   SSLSocketConnection* pSocketConnection = i->second;
-  
+
+  if( isStopped() )
+  {
+    onDisconnect( connector, s );
+    return;
+  }
+
+  SSL* ssl = pSocketConnection->sslObject();
+  errno = 0;
+  ERR_clear_error();
+  int rc = SSL_connect( ssl );
+  if( rc <= 0 )
+  {
+    int err = SSL_get_error( ssl, rc );
+    if( err == SSL_ERROR_WANT_READ )
+    {
+      connector.getMonitor().unsignal( s );
+    }
+    else if( err == SSL_ERROR_WANT_WRITE )
+    {
+      connector.getMonitor().remove( s );
+      connector.getMonitor().addConnect( s );
+    }
+    else
+    {
+      try
+      {
+        getLog()->onEvent("SSL_connect failed with SSL error " + IntConvertor::convert(err));
+      }
+      catch( std::exception& ) {}
+      onDisconnect( connector, s );
+    }
+    return;
+  }
+
+  connector.getMonitor().unsignal( s );
+  try
+  {
+    pSocketConnection->onConnect();
+  }
+  catch( std::exception& )
+  {
+    onDisconnect( connector, s );
+    return;
+  }
   m_connections[s] = pSocketConnection;
   m_pendingConnections.erase( i );
   setConnected( pSocketConnection->getSession()->getSessionID() );
   pSocketConnection->onTimeout();
+  if( !pSocketConnection->read(connector) )
+    onDisconnect( connector, s );
 }
 
 void SSLSocketInitiator::onWrite( SocketConnector& connector, int s )
 {
+  if( m_pendingConnections.find(s) != m_pendingConnections.end() )
+  {
+    onConnect( connector, s );
+    return;
+  }
   SocketConnections::iterator i = m_connections.find( s );
   if ( i == m_connections.end() ) return ;
   SSLSocketConnection* pSocketConnection = i->second;
@@ -403,22 +441,35 @@ void SSLSocketInitiator::onWrite( SocketConnector& connector, int s )
 
 bool SSLSocketInitiator::onData( SocketConnector& connector, int s )
 {
+  if( m_pendingConnections.find(s) != m_pendingConnections.end() )
+  {
+    onConnect( connector, s );
+    return true;
+  }
   SocketConnections::iterator i = m_connections.find( s );
   if ( i == m_connections.end() ) return false;
   SSLSocketConnection* pSocketConnection = i->second;
   return pSocketConnection->read( connector );
 }
 
-void SSLSocketInitiator::onDisconnect( SocketConnector&, int s )
+void SSLSocketInitiator::onDisconnect( SocketConnector& connector, int s )
 {
   SocketConnections::iterator i = m_connections.find( s );
   SocketConnections::iterator j = m_pendingConnections.find( s );
 
+  if( j != m_pendingConnections.end() )
+  {
+    SSLSocketConnection* pSocketConnection = j->second;
+    connector.getMonitor().remove( s );
+    setDisconnected( pSocketConnection->getSession()->getSessionID() );
+    delete pSocketConnection;
+    m_pendingConnections.erase( j );
+    return;
+  }
+
   SSLSocketConnection* pSocketConnection = 0;
   if( i != m_connections.end() ) 
     pSocketConnection = i->second;
-  if( j != m_pendingConnections.end() )
-    pSocketConnection = j->second;
   if( !pSocketConnection )
     return;
 
@@ -446,7 +497,7 @@ void SSLSocketInitiator::onTimeout( SocketConnector& )
   time_t now;
   ::time( &now );
 
-  if ( (now - m_lastConnect) >= m_reconnectInterval )
+  if ( !isStopped() && (now - m_lastConnect) >= m_reconnectInterval )
   {
     connect();
     m_lastConnect = now;

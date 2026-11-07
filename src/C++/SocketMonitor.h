@@ -55,6 +55,7 @@ public:
   bool addConnect( int socket );
   bool addRead( int socket );
   bool addWrite( int socket );
+  bool remove( int socket );
   bool drop( int socket );
   bool drop( int socket, bool notify );
   void signal( int socket );

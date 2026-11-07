@@ -1,0 +1,104 @@
+/****************************************************************************
+** This file is part of the QuickFIX FIX Engine
+** See http://www.quickfixengine.org/LICENSE for licensing information.
+****************************************************************************/
+
+#ifdef _MSC_VER
+#include "stdafx.h"
+#else
+#include "config.h"
+#endif
+
+#include <UnitTest++.h>
+#include <SocketMonitor.h>
+#include <Utility.h>
+
+SUITE(SocketMonitorRegistrationTests)
+{
+struct monitorSocketRuntime
+{
+  monitorSocketRuntime() { FIX::socket_init(); }
+  ~monitorSocketRuntime() { FIX::socket_term(); }
+};
+
+struct monitorFixture : FIX::SocketMonitor::Strategy, monitorSocketRuntime
+{
+  monitorFixture() : sockets( FIX::socket_createpair() ), connects( 0 ), writes( 0 ),
+                     reads( 0 ), errors( 0 ), byte( 0 ), reconnectOnWrite( false ) {}
+
+  ~monitorFixture()
+  {
+    FIX::socket_close( sockets.first );
+    FIX::socket_close( sockets.second );
+  }
+
+  void onConnect( FIX::SocketMonitor&, int ) { ++connects; }
+  void onWrite( FIX::SocketMonitor& monitor, int socket )
+  {
+    ++writes;
+    if( reconnectOnWrite )
+    {
+      monitor.remove( socket );
+      monitor.addConnect( socket );
+    }
+    else monitor.unsignal( socket );
+  }
+  void onEvent( FIX::SocketMonitor&, int socket )
+  {
+    ++reads;
+    FIX::socket_recv( socket, &byte, 1 );
+  }
+  void onError( FIX::SocketMonitor&, int ) { ++errors; }
+  void onError( FIX::SocketMonitor& ) { ++errors; }
+
+  std::pair<int, int> sockets;
+  int connects, writes, reads, errors;
+  char byte;
+  bool reconnectOnWrite;
+};
+
+TEST_FIXTURE(monitorFixture, connectInterestAndRemovalPreserveSocketOwnership)
+{
+  FIX::SocketMonitor monitor;
+  CHECK( sockets.first >= 0 && sockets.second >= 0 );
+  CHECK( monitor.addRead(sockets.first) );
+  CHECK( monitor.addWrite(sockets.first) );
+  CHECK_EQUAL( 1, FIX::socket_send(sockets.second, "r", 1) );
+
+  // Both directions are ready in this select. Rearming connect interest in
+  // the write callback must suppress the already selected stale read event.
+  reconnectOnWrite = true;
+  monitor.block( *this, true );
+  CHECK_EQUAL( 1, writes );
+  CHECK_EQUAL( 0, reads );
+  CHECK_EQUAL( 0, connects );
+  monitor.block( *this, true );
+  CHECK_EQUAL( 1, connects );
+  CHECK_EQUAL( 1, writes );
+  CHECK_EQUAL( 0, reads );
+  monitor.block( *this, true );
+  CHECK_EQUAL( 1, reads );
+  CHECK_EQUAL( 'r', byte );
+
+  CHECK( monitor.addWrite(sockets.first) );
+  CHECK( monitor.remove(sockets.first) );
+  CHECK_EQUAL( 0U, monitor.numSockets() );
+  CHECK_EQUAL( 1, FIX::socket_send(sockets.second, "s", 1) );
+  monitor.block( *this, true );
+  CHECK_EQUAL( 1, connects );
+  CHECK_EQUAL( 1, writes );
+  CHECK_EQUAL( 1, reads );
+  CHECK_EQUAL( 0, errors );
+  CHECK_EQUAL( 1, FIX::socket_recv(sockets.first, &byte, 1) );
+  CHECK_EQUAL( 's', byte );
+
+  CHECK( monitor.addConnect(sockets.first) );
+  monitor.block( *this, true );
+  CHECK_EQUAL( 2, connects );
+  CHECK_EQUAL( 1, FIX::socket_send(sockets.second, "t", 1) );
+  monitor.block( *this, true );
+  CHECK_EQUAL( 2, reads );
+  CHECK_EQUAL( 't', byte );
+  CHECK( monitor.remove(sockets.first) );
+}
+}
