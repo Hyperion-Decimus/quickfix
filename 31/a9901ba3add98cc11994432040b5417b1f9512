@@ -1,0 +1,19 @@
+src/C++/test/SocketMonitorTestCase.cpp
+  s_2712d3634e1eda::t_13b753d32b2352 1-100
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "31a9901ba3add98cc11994432040b5417b1f9512",
+  "prompts": {},
+  "sessions": {
+    "s_2712d3634e1eda": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2354cc8a-d897-4e3e-9fe3-ec94d1355a5e",
+        "model": "unknown"
+      },
+      "human_author": "Jeffrey Tai <jeffreyhtai@gmail.com>"
+    }
+  }
+}
