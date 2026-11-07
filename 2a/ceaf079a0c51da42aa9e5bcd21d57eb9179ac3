@@ -1,0 +1,34 @@
+src/C++/test/SSLSocketInitiatorTestCase.cpp
+  h_a960919c173e1d 15,69-70,118,178,181-188,190-191,203,205,208,217-219,291-292,315-316,320,322-330,334,336-371,435-438,440,442-446,457-460,498,500,512-513,515,534,536,541-542,569-571,573-582
+  h_a960919c173e1d 303-305,307-310,312-314,317-319,321,331-333,335
+src/C++/SocketMonitor.cpp
+  h_a960919c173e1d 251,270
+src/C++/SSLSocketInitiator.cpp
+  h_a960919c173e1d 395-396,400-404,425
+src/C++/test/SocketMonitorTestCase.cpp
+  h_a960919c173e1d 26-27,35,39-44,55,57,60,68-70,74,76-77,88-89,95-97
+  s_2712d3634e1eda::t_13b753d32b2352 16
+src/C++/test/SSLSocketHandshakeTestCase.cpp
+  h_a960919c173e1d 15,41-64,243-245,247,530-585
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2aceaf079a0c51da42aa9e5bcd21d57eb9179ac3",
+  "prompts": {},
+  "humans": {
+    "h_a960919c173e1d": {
+      "author": "Jeffrey Tai <jeffreyhtai@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_2712d3634e1eda": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2354cc8a-d897-4e3e-9fe3-ec94d1355a5e",
+        "model": "unknown"
+      },
+      "human_author": "Jeffrey Tai <jeffreyhtai@gmail.com>"
+    }
+  }
+}
