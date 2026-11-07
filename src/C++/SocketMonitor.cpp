@@ -97,6 +97,11 @@ bool SocketMonitor::addWrite( int s )
 
 bool SocketMonitor::drop( int s )
 {
+  return drop( s, true );
+}
+
+bool SocketMonitor::drop( int s, bool notify )
+{
   Sockets::iterator i = m_readSockets.find( s );
   Sockets::iterator j = m_writeSockets.find( s );
   Sockets::iterator k = m_connectSockets.find( s );
@@ -109,7 +114,7 @@ bool SocketMonitor::drop( int s )
     m_readSockets.erase( s );
     m_writeSockets.erase( s );
     m_connectSockets.erase( s );
-    m_dropped.push( s );
+    if( notify ) m_dropped.push( s );
     return true;
   }
   return false;
