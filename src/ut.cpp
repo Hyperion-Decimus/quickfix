@@ -52,9 +52,11 @@
 #include <SettingsTestCase.cpp>
 #include <SocketAcceptorTestCase.cpp>
 #include <SocketConnectorTestCase.cpp>
+#include <SocketMonitorTestCase.cpp>
 #include <SocketServerTestCase.cpp>
 #if HAVE_SSL
 #include <SSLSocketInitiatorTestCase.cpp>
+#include <SSLSocketHandshakeTestCase.cpp>
 #endif
 #include <TestHelper.cpp>
 #include <TimeRangeTestCase.cpp>

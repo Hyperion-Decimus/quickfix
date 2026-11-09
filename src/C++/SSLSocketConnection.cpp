@@ -142,7 +142,7 @@ SSLSocketConnection::SSLSocketConnection(SSLSocketInitiator &i,
                                     const SessionID& sessionID, int s, SSL * ssl,
                                     SocketMonitor* pMonitor )
 : m_socket( s ), m_ssl(ssl), m_sendLength( 0 ),
-  m_pSession( i.getSession( sessionID, *this ) ),
+  m_pSession( i.getSession( sessionID ) ),
   m_pMonitor( pMonitor ) 
 {
   FD_ZERO( &m_fds );
@@ -155,9 +155,15 @@ SSLSocketConnection::~SSLSocketConnection()
   if ( m_pSession )
     Session::unregisterSession( m_pSession->getSessionID() );
 
-  ssl_socket_close(m_socket, m_ssl);
+  if( SSL_is_init_finished(m_ssl) )
+    ssl_socket_close(m_socket, m_ssl);
 
   SSL_free(m_ssl);
+}
+
+void SSLSocketConnection::onConnect()
+{
+  if( m_pSession ) m_pSession->setResponder( this );
 }
 
 bool SSLSocketConnection::send( const std::string& msg )

@@ -31,8 +31,10 @@ libquickfixcpptest_la_SOURCES = \
 	SettingsTestCase.cpp \
 	SocketAcceptorTestCase.cpp \
 	SocketConnectorTestCase.cpp \
+	SocketMonitorTestCase.cpp \
 	SocketServerTestCase.cpp \
 	SSLSocketInitiatorTestCase.cpp \
+	SSLSocketHandshakeTestCase.cpp \
 	StringUtilitiesTestCase.cpp \
 	TestHelper.cpp \
 	TimeRangeTestCase.cpp \

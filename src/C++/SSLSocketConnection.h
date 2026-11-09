@@ -156,6 +156,7 @@ public:
   bool read( SocketConnector& s );
   bool read( SSLSocketAcceptor&, SocketServer& );
   bool processQueue();
+  void onConnect();
 
   void signal()
   {

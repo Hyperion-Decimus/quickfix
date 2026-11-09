@@ -164,6 +164,7 @@ private:
   void onStop();
 
   void doConnect( const SessionID&, const Dictionary& d );
+  void clearPendingConnections();
   void onConnect( SocketConnector&, int );
   void onWrite( SocketConnector&, int );
   bool onData( SocketConnector&, int );
