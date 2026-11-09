@@ -88,11 +88,7 @@ struct TLSLedger
   int index;
 };
 
-#if OPENSSL_VERSION_NUMBER < 0x10100000L
-int tlsAllocated( void*, void*, CRYPTO_EX_DATA* data, int index, long, void* argument )
-#else
 void tlsAllocated( void*, void*, CRYPTO_EX_DATA* data, int index, long, void* argument )
-#endif
 {
   TLSLedger& ledger = *static_cast<TLSLedger*>( argument );
   pthread_mutex_lock( &ledger.mutex );
@@ -104,9 +100,6 @@ void tlsAllocated( void*, void*, CRYPTO_EX_DATA* data, int index, long, void* ar
     pthread_cond_broadcast( &ledger.changed );
   }
   pthread_mutex_unlock( &ledger.mutex );
-#if OPENSSL_VERSION_NUMBER < 0x10100000L
-  return 1;
-#endif
 }
 
 void tlsReleased( void*, void* tag, CRYPTO_EX_DATA*, int, long, void* argument )

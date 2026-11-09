@@ -273,16 +273,9 @@ struct HandshakeClient
     BIO_set_callback( writeBIO, retryWrite );
   }
 
-#if OPENSSL_VERSION_NUMBER < 0x10100000L
-  static int capture( void* parent, void*, CRYPTO_EX_DATA*, int, long, void* )
-#else
   static void capture( void* parent, void*, CRYPTO_EX_DATA*, int, long, void* )
-#endif
   {
     if( active && !active->client ) active->client = static_cast<SSL*>(parent);
-#if OPENSSL_VERSION_NUMBER < 0x10100000L
-    return 1;
-#endif
   }
 
   static long retryWrite( BIO* bio, int operation, const char*, int, long, long result )

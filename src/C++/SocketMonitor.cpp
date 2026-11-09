@@ -113,11 +113,6 @@ bool SocketMonitor::remove( int s )
   return false;
 }
 
-bool SocketMonitor::drop( int s )
-{
-  return drop( s, true );
-}
-
 bool SocketMonitor::drop( int s, bool notify )
 {
   if( !remove(s) ) return false;
