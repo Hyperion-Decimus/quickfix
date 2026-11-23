@@ -16,10 +16,18 @@
 #include <SSLSocketInitiator.h>
 #include <MessageStore.h>
 #include <Parser.h>
+#include <Session.h>
 #include <fix44/Logon.h>
 #include <fix44/TestRequest.h>
 #include <sstream>
 #include <stdexcept>
+#ifndef _MSC_VER
+#include <cerrno>
+#include <cstdio>
+#include <fcntl.h>
+#include <memory>
+#include <unistd.h>
+#endif
 
 SUITE(SSLSocketHandshakeTests)
 {
@@ -422,6 +430,59 @@ TEST(pendingHandshakeResumesOnWriteReadiness)
   }
   initiator.stop( true );
 }
+
+#ifndef _MSC_VER
+TEST(establishedDisconnectPreservesReusedDescriptor)
+{
+  HandshakeContext context;
+  HandshakePeer peer;
+  HandshakeApplication application;
+  FIX::MemoryStoreFactory store;
+  FIX::SessionSettings settings = handshakeSettings( peer.port );
+  FIX::SSLSocketInitiator initiator( application, store, settings );
+  FIX::SessionID sessionID( "FIX.4.4", "A_SILENT", "LOCAL" );
+  HandshakeClient client;
+
+  CHECK( initiator.poll( 0 ) );
+  peer.accept( initiator );
+  for( int turn = 0; turn < 32 && application.loggedOn.empty(); ++turn )
+  {
+    peer.step( context.context );
+    initiator.poll( 0 );
+  }
+  requireTLSFixture( application.loggedOn.count(sessionID) == 1 );
+  requireTLSFixture( client.client != 0 );
+  int socket = SSL_get_fd( client.client );
+  requireTLSFixture( socket >= 0 );
+
+  std::unique_ptr<FILE, int(*)(FILE*)> replacement( std::tmpfile(), &std::fclose );
+  requireTLSFixture( replacement.get() != 0 );
+  FIX::Session* session = FIX::Session::lookupSession( sessionID );
+  requireTLSFixture( session != 0 );
+  session->reset();
+  errno = 0;
+  requireTLSFixture( ::fcntl(socket, F_GETFD) == -1 && errno == EBADF );
+
+  // Reuse the exact retired descriptor before deferred connection destruction.
+  struct ReusedDescriptor
+  {
+    explicit ReusedDescriptor( int descriptor ) : descriptor( descriptor ) {}
+    ~ReusedDescriptor() { ::close( descriptor ); }
+    int descriptor;
+  } reused( ::dup2(::fileno(replacement.get()), socket) );
+  requireTLSFixture( reused.descriptor == socket );
+  CHECK( initiator.poll( 0 ) );
+  CHECK( application.loggedOut.count(sessionID) == 1 );
+
+  const char marker = 'R';
+  CHECK_EQUAL( 1, ::write(reused.descriptor, &marker, 1) );
+  CHECK_EQUAL( 0, ::lseek(::fileno(replacement.get()), 0, SEEK_SET) );
+  char observed = 0;
+  CHECK_EQUAL( 1, ::read(::fileno(replacement.get()), &observed, 1) );
+  CHECK_EQUAL( marker, observed );
+  initiator.stop( true );
+}
+#endif
 
 TEST(activationStoreFailureRetiresPendingHandshake)
 {

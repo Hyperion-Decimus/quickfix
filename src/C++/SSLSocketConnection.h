@@ -151,6 +151,7 @@ public:
   virtual ~SSLSocketConnection();
 
   int getSocket() const { return m_socket; }
+  int detachSocket();
   Session* getSession() const { return m_pSession; }
 
   bool read( SocketConnector& s );
@@ -183,7 +184,7 @@ private:
   bool isValidSession();
   void readFromSocket() EXCEPT(SocketRecvFailed );
   bool readMessage( std::string& msg );
-  void readMessages( SocketMonitor& s );
+  void readMessages();
   bool send( const std::string& );
   void disconnect();
 
