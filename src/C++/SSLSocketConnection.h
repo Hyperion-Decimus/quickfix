@@ -151,6 +151,7 @@ public:
   virtual ~SSLSocketConnection();
 
   int getSocket() const { return m_socket; }
+  int detachSocket();
   Session* getSession() const { return m_pSession; }
 
   bool read( SocketConnector& s );
@@ -177,8 +178,6 @@ public:
   SSL *sslObject() { return m_ssl; }
 
 private:
-  friend class SSLSocketInitiator;
-
   typedef std::deque<std::string, ALLOCATOR<std::string> >
     Queue;
 
@@ -188,7 +187,6 @@ private:
   void readMessages();
   bool send( const std::string& );
   void disconnect();
-  void disconnect( bool notify );
 
   int m_socket;
   SSL *m_ssl;

@@ -240,19 +240,19 @@ bool SSLSocketConnection::processQueue()
   return m_sendQueue.empty();
 }
 
-void SSLSocketConnection::disconnect()
+int SSLSocketConnection::detachSocket()
 {
-  disconnect( true );
+  const int socket = m_socket;
+  m_socket = -1;
+  return socket;
 }
 
-void SSLSocketConnection::disconnect( bool notify )
+void SSLSocketConnection::disconnect()
 {
   if( !m_pMonitor || !socket_isValid(m_socket) ) return;
 
-  const int socket = m_socket;
-  if( BIO_get_close( SSL_get_rbio(m_ssl) ) == BIO_NOCLOSE )
-    m_socket = -1;
-  m_pMonitor->drop( socket, notify );
+  const bool monitorOwnsSocket = BIO_get_close( SSL_get_rbio(m_ssl) ) == BIO_NOCLOSE;
+  m_pMonitor->drop( monitorOwnsSocket ? detachSocket() : m_socket );
 }
 
 bool SSLSocketConnection::read( SocketConnector& )

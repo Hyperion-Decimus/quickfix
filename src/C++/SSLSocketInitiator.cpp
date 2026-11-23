@@ -203,7 +203,7 @@ SSLSocketInitiator::~SSLSocketInitiator()
     if( socket_isValid(connection->getSocket()) &&
         SSL_is_init_finished(connection->sslObject()) )
       ssl_socket_close( connection->getSocket(), connection->sslObject() );
-    connection->disconnect( false );
+    m_connector.getMonitor().drop( connection->detachSocket(), false );
     delete connection;
   }
 
@@ -485,7 +485,7 @@ void SSLSocketInitiator::onDisconnect( SocketConnector& connector, int s )
 
   setDisconnected( pSocketConnection->getSession()->getSessionID() );
 
-  pSocketConnection->disconnect( false );
+  connector.getMonitor().drop( pSocketConnection->detachSocket(), false );
   Session* pSession = pSocketConnection->getSession();
   if ( pSession )
   {
