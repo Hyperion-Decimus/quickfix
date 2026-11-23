@@ -177,15 +177,18 @@ public:
   SSL *sslObject() { return m_ssl; }
 
 private:
+  friend class SSLSocketInitiator;
+
   typedef std::deque<std::string, ALLOCATOR<std::string> >
     Queue;
 
   bool isValidSession();
   void readFromSocket() EXCEPT(SocketRecvFailed );
   bool readMessage( std::string& msg );
-  void readMessages( SocketMonitor& s );
+  void readMessages();
   bool send( const std::string& );
   void disconnect();
+  void disconnect( bool notify );
 
   int m_socket;
   SSL *m_ssl;

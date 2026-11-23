@@ -198,7 +198,14 @@ SSLSocketInitiator::~SSLSocketInitiator()
   SocketConnections::iterator i;
   for (i = m_connections.begin();
        i != m_connections.end(); ++i)
-    delete i->second;
+  {
+    SSLSocketConnection* connection = i->second;
+    if( socket_isValid(connection->getSocket()) &&
+        SSL_is_init_finished(connection->sslObject()) )
+      ssl_socket_close( connection->getSocket(), connection->sslObject() );
+    connection->disconnect( false );
+    delete connection;
+  }
 
   if (m_sslInit)
   {
@@ -410,14 +417,17 @@ void SSLSocketInitiator::onConnect( SocketConnector& connector, int s )
   connector.getMonitor().unsignal( s );
   try
   {
+    m_connections[s] = pSocketConnection;
     pSocketConnection->onConnect();
   }
   catch( std::exception& )
   {
+    m_connections.erase( s );
     onDisconnect( connector, s );
     return;
   }
-  m_connections[s] = pSocketConnection;
+  // The monitor owns the descriptor once the connection is active.
+  BIO_set_close( SSL_get_rbio(ssl), BIO_NOCLOSE );
   m_pendingConnections.erase( i );
   setConnected( pSocketConnection->getSession()->getSessionID() );
   pSocketConnection->onTimeout();
@@ -475,6 +485,7 @@ void SSLSocketInitiator::onDisconnect( SocketConnector& connector, int s )
 
   setDisconnected( pSocketConnection->getSession()->getSessionID() );
 
+  pSocketConnection->disconnect( false );
   Session* pSession = pSocketConnection->getSession();
   if ( pSession )
   {

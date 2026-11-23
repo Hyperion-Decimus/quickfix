@@ -155,7 +155,8 @@ SSLSocketConnection::~SSLSocketConnection()
   if ( m_pSession )
     Session::unregisterSession( m_pSession->getSessionID() );
 
-  if( SSL_is_init_finished(m_ssl) )
+  if( BIO_get_close( SSL_get_rbio(m_ssl) ) == BIO_CLOSE &&
+      SSL_is_init_finished(m_ssl) )
     ssl_socket_close(m_socket, m_ssl);
 
   SSL_free(m_ssl);
@@ -170,6 +171,8 @@ bool SSLSocketConnection::send( const std::string& msg )
 {
   Locker l( m_mutex );
 
+  if( !socket_isValid(m_socket) ) return false;
+
   m_sendQueue.push_back( msg );
   processQueue();
   signal();
@@ -180,6 +183,7 @@ bool SSLSocketConnection::processQueue()
 {
   Locker l( m_mutex );
 
+  if( !socket_isValid(m_socket) ) return false;
   if( m_sendQueue.empty() ) return true;
 
   struct timeval timeout = { 0, 0 };
@@ -238,18 +242,29 @@ bool SSLSocketConnection::processQueue()
 
 void SSLSocketConnection::disconnect()
 {
-  if ( m_pMonitor )
-    m_pMonitor->drop( m_socket );
+  disconnect( true );
 }
 
-bool SSLSocketConnection::read( SocketConnector& s )
+void SSLSocketConnection::disconnect( bool notify )
 {
+  if( !m_pMonitor || !socket_isValid(m_socket) ) return;
+
+  const int socket = m_socket;
+  if( BIO_get_close( SSL_get_rbio(m_ssl) ) == BIO_NOCLOSE )
+    m_socket = -1;
+  m_pMonitor->drop( socket, notify );
+}
+
+bool SSLSocketConnection::read( SocketConnector& )
+{
+  // The monitor delivers the queued disconnect after the current callback.
+  if( !socket_isValid(m_socket) ) return true;
   if ( !m_pSession ) return false;
 
   try
   {
     readFromSocket();
-    readMessages( s.getMonitor() );
+    readMessages();
   }
   catch( SocketRecvFailed& e )
   {
@@ -306,7 +321,7 @@ bool SSLSocketConnection::read(SSLSocketAcceptor &a, SocketServer& s )
     else
     {
       readFromSocket();
-      readMessages( s.getMonitor() );
+      readMessages();
       return true;
     }
   }
@@ -404,12 +419,12 @@ bool SSLSocketConnection::readMessage( std::string& msg )
   return true;
 }
 
-void SSLSocketConnection::readMessages( SocketMonitor& s )
+void SSLSocketConnection::readMessages()
 {
   if( !m_pSession ) return;
 
   std::string msg;
-  while( readMessage( msg ) )
+  while( socket_isValid(m_socket) && readMessage( msg ) )
   {
     try
     {
@@ -418,14 +433,14 @@ void SSLSocketConnection::readMessages( SocketMonitor& s )
     catch ( InvalidMessage& )
     {
       if( !m_pSession->isLoggedOn() )
-        s.drop( m_socket );
+        disconnect();
     }
   }
 }
 
 void SSLSocketConnection::onTimeout()
 {
-  if ( m_pSession ) m_pSession->next();
+  if( socket_isValid(m_socket) && m_pSession ) m_pSession->next();
 }
 
 } // namespace FIX
